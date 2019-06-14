@@ -1,0 +1,298 @@
+#!/bin/bash
+
+#specify file if no input file is given
+otherFile="otherFile$$"
+
+#trap signal for created file
+trap "rm -f $otherFile; echo 'Done'; exit 1" SIGINT SIGHUP SIGTERM
+
+#get dimensions of matrix
+dims() {
+
+  rows=0
+  cols=0
+
+  #for each line, increment rows
+  while read myLine
+  do
+    rows=$(expr $rows + 1)
+    #for the first row, count the number of entries to get the amount of columns
+    if [[ $cols == 0 ]]
+    then
+      for i in $myLine
+      do
+        cols=$(expr $cols + 1)
+      done
+    fi
+  #first param or from stdin
+  done < "${1:-/dev/stdin}"
+  echo $rows $cols
+  exit 0
+}
+
+#function gets number of rows from a given parameter
+rowNum() {
+	rows=0
+	while read myLine
+	do
+		rows=$(expr $rows + 1)
+	done < "$1"
+	return $rows
+}
+
+#function gets number of columns from a given parameter
+colNum() {
+	cols=0
+	read myLine < $1
+	for i in $myLine
+	do
+		cols=$(expr $cols + 1)
+	done
+	return $cols
+}
+
+transpose() {
+
+  declare -A myArray
+
+  #fill array with input
+  row=0
+  while read myLine
+  do
+    col=0
+    for i in $myLine
+    do
+      myArray[$col, $row]=$i
+      col=$(expr $col + 1)
+    done
+    row=$(expr $row + 1)
+  #first param or from stdin
+  done < "${1:-/dev/stdin}"
+  rows=$row
+  cols=$col
+
+  #Display array
+  for i in $( seq 0 $( expr $cols - 1 ) )
+  do
+    myLine=
+    for j in $( seq 0 $( expr $rows ) )
+    do
+      #access index in reverse order (col,row)
+      num=${myArray[$i, $j]}
+      myLine="$myLine$num\\t"
+    done
+    #Slice line until last 4 characters in string
+    myLine=${myLine::-4}
+    #print line and newline
+    echo -e $myLine
+  done
+}
+
+#mean function
+mean() {
+  #count rows during while loop
+  row=0
+  display=
+  #read from input
+  while read myLine
+  do
+    col=1
+    myArray=
+    #for each entry, add to the sum
+    for i in $myLine
+    do
+      myArray[$col]=$(expr ${myArray[$col]} + $i)
+      col=$(expr $col + 1)
+    done
+    row=$(expr $row + 1)
+  #first param or from stdin
+  done < "${1:-/dev/stdin}"
+
+  #display mean
+  for i in $(seq 1 $(expr $col - 1))
+  do
+    sum=0
+    #check for int division
+    if test ${myArray[$i]} -gt 0
+    then
+      sum=1
+    fi
+    #calculate average with formula given from assignment
+    sum=$(expr $(expr $(expr $(expr $(expr $sum \* 2) - 1) \* $(expr $row / 2)) + ${myArray[$i]}) / $row)
+    display="$display$sum\\t"
+  done
+  #slice line until last 2 characters in string and display line
+  display=${display::-2}
+  echo -e $display
+}
+
+#add function for adding 2 matricies
+add() {
+
+  matrix1=$(dims $1)
+  matrix2=$(dims $2)
+
+  #check if dimensions are the same for addition
+  if test "$matrix1" = "$matrix2"
+  then
+    #merge both files with period delimiter
+    paste -d . $1 $2 | while IFS="$(printf '.')" read -r m1 m2
+    do
+      myLine=
+
+      #read each input into specified array
+      myArray1=($m1)
+      myArray2=($m2)
+
+      index=0
+      #for each entry in the matrix, sum the integers at the given array index
+      for i in $m1
+      do
+        num=$(expr ${myArray1[index]} + ${myArray2[index]})
+        myLine="$myLine$num\\t"
+        index=$(expr $index + 1) #inc index
+      done
+      #slice line until last 2 characters in string and display line
+      myLine=${myLine::-2}
+      echo -e $myLine
+    done
+  #if dimensions are not same, throw error
+  else
+    >&2 echo "Matrices do not have matching dimensions..."
+    exit 5
+  fi
+}
+
+#multiply function for two given matricies
+multiply() {
+  declare -A myArray1
+  declare -A myArray2
+
+
+  row=0
+  #populate first array
+  while read myLine
+  do
+    col=0
+
+    for i in $myLine
+    do
+      myArray1[$row, $col]=$i
+      col=$(expr $col + 1)
+    done
+
+    row=$(expr $row + 1)
+  done < $1
+  rows1=$row
+  cols1=$col
+
+  #populate second array
+  row=0
+  while read myLine
+  do
+    col=0
+
+    for i in $myLine
+    do
+      myArray2[$row, $col]=$i
+      col=$(expr $col + 1)
+    done
+
+    row=$(expr $row + 1)
+  done < $2
+  rows2=$row
+  cols2=$col
+
+  #check if dimensions do not meet the requirment for matrix multiplication
+  if test $rows2 -ne $cols1
+  then
+    >&2 echo "Size incompatible. Can not multiply matrices.."
+    exit 7
+  fi
+
+  #display multiplied matrix
+  for (( i = 0; i < $rows1; i++))
+  do
+    display=
+    for (( j = 0; j < $cols2; j++))
+    do
+      sum=0
+      for (( k = 0; k < $cols1; k++))
+      do
+        #get index of left array (first), right array (second) and multiply
+        left=${myArray1[$i, $k]}
+        right=${myArray2[$k, $j]}
+        product=$(expr $left \* $right)
+        #sum up products which share an index k (column for left, row for right)
+        sum=$(expr $sum + $product)
+      done
+      display="$display$sum\\t"
+    done
+    display=${display::-2}
+    echo -e $display
+  done
+}
+
+#checks which function is being called
+#run if dims is called with a file
+if   [[ $1 == "dims" &&  $# == "2" && -r "$2" ]]
+then
+  dims $2
+
+#run if dims is called without a file (input given through stdin)
+elif [[ $1 == "dims" &&  $# == "1" ]]
+then
+  while read myLine
+    do
+      echo "$myLine" >> $otherFile
+    done
+    dims $otherFile
+    rm -f $otherFile
+
+#run if transpose is called with a file
+elif [[ $1 == "transpose" &&  $# == "2" && -r "$2" ]]
+then
+  transpose $2
+
+#run if transpose is called without a file (input given through stdin)
+elif [[ $1 == "transpose" &&  $# == "1" ]]
+then
+    while read myLine
+    do
+      echo "$myLine" >> $otherFile
+    done
+    transpose $otherFile
+    rm -f $otherFile
+
+#run if mean is called with a file
+elif [[ $1 == "mean" &&  $# == "2" && -r "$2" ]]
+then
+  mean $2
+
+#run if mean is called without a file (input given through stdin)
+elif [[ $1 == "mean" &&  $# == "1" ]]
+then
+  while read myLine
+  do
+    echo "$myLine" >> $otherFile
+  done
+    mean $otherFile
+    rm -f $otherFile
+
+#run if add is called with two readable files
+elif [[ $1 == "add" &&  $# == "3" && -r "$2" && -r "$3" ]]
+then
+  add $2 $3
+
+#run if multiply is called with two readable files
+elif [[ $1 == "multiply" &&  $# == "3" && -r "$2" && -r "$3" ]]
+then
+  multiply $2 $3
+
+#if none of the above match, display error
+else
+	echo "No function matches the specified parameters..." >&2
+  exit 6
+fi
+
+exit 0
